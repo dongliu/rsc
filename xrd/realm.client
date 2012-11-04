@@ -1,0 +1,8 @@
+#
+# This file defines user password and realm for http client
+#
+# The format is
+#  <username>: <password>@<realm>
+#
+jetty: jetty@transfer
+

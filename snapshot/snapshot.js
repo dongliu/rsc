@@ -25,16 +25,15 @@ pv_list.forEach(function(pv) {
   ca.exec('caget', pv, function(err, result) {
     complete = complete + 1;
     if (err) {
-      results[pv.replace(/:/g, '_')] = {
+      results[pv] = {
         name: pv,
         value: 'unavailable'
       };
     } else {
-      results[pv.replace(/:/g, '_')] = ca.parseCaget(result);
+      results[pv] = ca.parseCaget(result);
     }
     if (complete == size) {
       console.log('the snapshot took ' + (Date.now() - start) + ' milliseconds.');
-      // console.log(results);
     }
   });
 });

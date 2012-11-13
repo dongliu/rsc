@@ -22,7 +22,7 @@ for pv_name in pv_list:
     ch = ca.create_channel(pv_name, connect=False, auto_cb=False)
     result[pv_name] = [ch, None, None]
 for pv_name, data in result.items():
-    result[pv_name][1] = ca.connect_channel(data[0])
+    result[pv_name][1] = ca.connect_channel(data[0], timeout=1.0)
 ca.poll()
 for pv_name, data in result.items():
     if result[pv_name][1]:

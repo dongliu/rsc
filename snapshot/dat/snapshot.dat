@@ -1,0 +1,8 @@
+# snapshot results from pyepics pv ca threading and node programs
+
+pvs  91c  91c+4d  91c+15d
+pv  2743.5  10741.7 32802.4
+ca  201.8 5154.4  16161.8
+pv-threading  6288.7  9387.9  10303.5
+ca-threading  6197.6  7255.8  8026.2
+node  373.2 1323  1366

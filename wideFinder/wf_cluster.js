@@ -1,20 +1,16 @@
-'use strict';
 var cluster = require('cluster');
-var pattern = /GET\s\/ongoing\/When\/\d\d\dx\/(\d\d\d\d\/\d\d\/\d\d\/[^\s\.]+)\s/;
+var util = require('util');
 var numCPUs = require('os').cpus().length;
-
 var fs = require('fs');
-var stream = require('stream').Stream;
-var size = fs.statSync('./O.Big.log').size;
-var fileName = './O.Big.log';
+var fileName = process.argv[2];
+var size = fs.statSync(fileName).size;
+var blockSize = 64*1024*1024;
+var i, reduced = 0, jobSize = 0;
+var reduce_u_hits = {}, reduce_u_bytes = {}, reduce_s404s = {}, reduce_clients = {}, reduce_refs = {};
+var jobs = [];
 
-var i, workerId, finished = 0;
-
-var ends = [], starts, map = [], result = {}, resultArray = [], n = numCPUs - 1;
-
-var now = Date.now();
 if (cluster.isMaster) {
-  for (i = 0; i < n; i += 1) {
+  for (i = 0; i < numCPUs -1; i += 1) {
     cluster.fork();
   }
 
@@ -22,73 +18,105 @@ if (cluster.isMaster) {
     console.log('worker ' + worker.process.pid + ' died');
   });
 
-  for (workerId in cluster.workers) {
-    cluster.workers[workerId].on('message', function(reduce) {
-      var k;
-      finished += 1;
-      if (reduce.result) {
-        // console.log(reduce.result);
-        for (k in reduce.result) {
-          if (result.hasOwnProperty(k)) {
-            result[k] += reduce.result[k];
-          } else {
-            result[k] = reduce.result[k];
-          }
-        }
-      }
-      if (finished === n) {
-        for (k in result) {
-          resultArray.push({key: k, value: result[k]});
-        }
-        resultArray.sort(function(a, b) {
-          return (b.value - a.value);
-        });
-        for (i = 0; i < 10; i += 1) {
-          console.log(resultArray[i] );
-        }
-        console.log('it took ' + (Date.now()-now));
-        // destroy the workers
-        Object.keys(cluster.workers).forEach(function(id) {
-          cluster.workers[id].destroy();
-        });
-      }
-    });
-  }
-
-  for (i = 0 ; i < n - 1; i += 1) {
-    findEnd('./O.Big.log', Math.round(size * (i+1) / n), size, function(err, end) {
-      var j, id;
-      if (err) {
-        console.log(err.message);
+  Object.keys(cluster.workers).forEach(function(workerId) {
+    cluster.workers[workerId].on('message', function(msg) {
+      var k, result, wid, now;
+      reduced += 1;
+      if (util.isError(msg)) {
+        console.log(reduce.message);
       } else {
-        ends.push(end);
-      }
-      if (ends.length === n-1) {
-        ends = ends.sort(function(a,b) {
-          return (a - b);
-        });
-        starts = ends.slice(0);
-        for (j = 0; j < n-1; j += 1) {
-          starts[j] += 1;
+        if (jobs.length > 0) {
+          cluster.workers[msg.workerId].send({workerId: msg.workerId, job: jobs.pop()});
         }
-        ends.push(size);
-        starts.unshift(0);
-        j = 0;
-        for (id in cluster.workers) {
-          cluster.workers[id].send({range:{start: starts[j], end: ends[j]}});
-          j += 1;
+        result = msg.result;
+        for (k in result.u_hits) {
+          updateObject(reduce_u_hits, k, result.u_hits[k]);
+        }
+        for (k in result.u_bytes) {
+          updateObject(reduce_u_bytes, k, result.u_bytes[k]);
+        }
+        for (k in result.s404s) {
+          updateObject(reduce_s404s, k, result.s404s[k]);
+        }
+        for (k in result.clients) {
+          updateObject(reduce_clients, k, result.clients[k]);
+        }
+        for (k in result.refs) {
+          updateObject(reduce_refs, k, result.refs[k]);
+        }
+
+        if (reduced === jobSize) {
+          now = Date.now();
+          console.log('URIs by hit');
+          sortObject(reduce_u_hits);
+          console.log('URIs by bytes');
+          sortObject(reduce_u_bytes);
+          console.log('404s');
+          sortObject(reduce_s404s);
+          console.log('client addresses');
+          sortObject(reduce_clients);
+          console.log('referrers');
+          sortObject(reduce_refs);
+          console.log('sorting takes ' + (Date.now() - now));
+          Object.keys(cluster.workers).forEach(function(wid) {
+            cluster.workers[wid].destroy();
+          });
+          process.exit(0);
         }
       }
     });
-  }
+  });
+
+  findEnds(fileName, 0, blockSize, size, [], function(err, ends) {
+    var starts, i;
+    if (err) {
+      console.log(err.message);
+      process.exit(0);
+    } else {
+      starts = ends.slice(0, -1);
+      for (i = 0; i < starts.length; i += 1) {
+        starts[i] += 1;
+      }
+      starts.unshift(0);
+      for (i = 0; i < starts.length; i += 1) {
+        jobs.push({start: starts[i], end: ends[i]});
+      }
+      jobSize = jobs.length;
+      for (workerId in cluster.workers) {
+        if (jobs.length > 0) {
+          cluster.workers[workerId].send({workerId: workerId, job: jobs.pop()});
+        }
+      }
+    }
+  });
+
+
 } else if(cluster.isWorker) {
   process.on('message', function(msg) {
-    if (msg.range) {
-      finder(fileName, msg.range.start, msg.range.end, pattern, function(err, result) {
+    var fs = require('fs'), stream, block = '';
+    var u_hits = {}, u_bytes = {}, s404s = {}, clients = {}, refs = {}, lines;
+    if (msg.job.start !== null && msg.job.end !== null) {
+      fs.open(fileName,'r', function(err, fd) {
         if (err) {
-          process.send({err: err});
+          process.send(err);
         } else {
-          process.send({result: result});
+          stream = fs.createReadStream(fileName, {
+            flags: 'r',
+            encoding: 'utf8',
+            start: msg.job.start,
+            end: msg.job.end
+          });
+          stream.on('data', function(data) {
+            block = block + data;
+          });
+          stream.on('end', function() {
+            lines = block.split(/\n/);
+            if (lines[lines.length-1].length === 0 ) {
+              lines.pop();
+            }
+            parse(lines, u_hits, u_bytes, s404s, clients, refs);
+            process.send({workerId: msg.workerId, result: {u_hits: u_hits, u_bytes: u_bytes, s404s: s404s, clients: clients, refs: refs}});
+          });
         }
       });
     }
@@ -96,57 +124,31 @@ if (cluster.isMaster) {
 
 }
 
-function finder(fileName, start, end, pattern, cb) {
-  var fs = require('fs');
-  var StringDecoder = require('string_decoder').StringDecoder;
-  var decoder = new StringDecoder('utf8');
-  var result = {};
-  var stream = fs.createReadStream(fileName, {
-      start: start,
-      end: end
+function sortObject(obj) {
+  var array = [], k, i;
+  for (k in obj) {
+    array.push({key: k, value: obj[k]});
+  }
+  array.sort(function(a, b) {
+    return (b.value - a.value);
   });
-  var newline = '\n'.charCodeAt(0);
-  var linenumber = 0;
-  var left = new Buffer(0);
-  stream.on('data', function(data) {
-    var i, last = 0, line, match;
-    for (i = 0; i < data.length; i += 1) {
-      if(newline === data[i]) {
-        linenumber += 1;
-        if (last === 0 && Buffer.isBuffer(left) && left.length !== 0) {
-          line = Buffer.concat([left, data.slice(0, i)]).toString('utf8');
-          left = new Buffer(0);
-        } else {
-          line = data.toString('utf8', last, i);
-        }
-        match = pattern.exec(line);
-        if (match) {
-          // console.log(match[1]);
-          if (result[match[1]]) {
-            result[match[1]] += 1;
-          } else {
-            result[match[1]] = 1;
-          }
-        }
-        last = i + 1;
-      }
-    }
-    left = Buffer.concat([left, data.slice(last)]);
-  });
-  stream.on('end', function(){
-    console.log('processed ' + linenumber + ' lines');
-    cb(null,result);
-  });
-  stream.on('error', function(err){
-    cb(err, null);
-  });
+  for (i = 0; i < 10; i += 1) {
+    console.log('     ' + array[i].value + ':' + array[i].key.substring(0,59));
+  }
+}
 
+function updateObject(obj, key, value) {
+  if (obj[key]) {
+    obj[key] += value;
+  } else {
+    obj[key] = value;
+  }
 }
 
 function findEnd(fileName, position, size, cb) {
   var fs, stream, last = position;
   if (position >= size) {
-    return cb(null, size);
+    return cb(null, size-1);
   }
   fs = require('fs');
   stream = fs.createReadStream(fileName, {
@@ -154,11 +156,9 @@ function findEnd(fileName, position, size, cb) {
   });
   stream.on('data', function(data) {
     var newline = '\n'.charCodeAt(0);
-    // var i, found = false, last = position;
     var i;
     for (i = 0; i < data.length; i += 1) {
       if(newline === data[i]) {
-        // find an ending
         stream.destroy();
         return cb(null, last + i);
       }
@@ -171,4 +171,55 @@ function findEnd(fileName, position, size, cb) {
   stream.on('error', function(err){
     return cb(err, null);
   });
+}
+
+function findEnds(fileName, position, blockSize, size, ends, cb) {
+  findEnd(fileName, position + blockSize, size, function(err, end) {
+    if (err) {
+      return cb(err, null);
+    }
+    ends.push(end);
+    if (end === size - 1) {
+      return cb(null, ends);
+    } else {
+      findEnds(fileName, end + 1, blockSize, size, ends, cb);
+    }
+  });
+}
+
+function parse(lines, u_hits, u_bytes, s404s, clients, refs) {
+  var i, line, f, client, u, status, bytes, ref;
+  var pattern = /^\/ongoing\/When\/\d\d\dx\/\d\d\d\d\/\d\d\/\d\d\/[^\s\.]+$/;
+  var refPattern = /^"http:\/\/www\.tbray\.org\/ongoing\//;
+  for (i = 0; i < lines.length; i += 1) {
+    line = lines[i];
+    f = line.split(/\s/);
+    if (f[5] === '"GET') {
+      client = f[0];
+      u = f[6];
+      status = f[8];
+      bytes = f[9];
+      ref = f[10];
+      if (status === '200') {
+        updateObject(u_bytes, u, parseInt(bytes, 10));
+        if (pattern.test(u)) {
+          updateObject(u_hits, u, 1);
+          updateObject(clients, client, 1);
+          if (!(ref === '"-"' || refPattern.test(ref))) {
+            updateObject(refs, ref.substring(1, ref.length-1), 1);
+          }
+        }
+      } else if (status === '304') {
+        if (pattern.test(u)) {
+          updateObject(u_hits, u, 1);
+          updateObject(clients, client, 1);
+          if (!(ref === '"-"' || refPattern.test(ref))) {
+            updateObject(refs, ref.substring(1, ref.length-1), 1);
+          }
+        }
+      } else if (status === '404') {
+        updateObject(s404s, u, 1);
+      }
+    }
+  }
 }

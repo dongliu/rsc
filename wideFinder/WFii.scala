@@ -1,6 +1,8 @@
 //== WFii -- Wide Finder 2 for Scala 2.8.0.Beta1-prerelease
 //== Author: Rex Kerr    Last update: 2010 02 17     License: LGPL2.1
 
+//== updated by Dong Liu to compile and run it with Ruby 1.8.7
+
 //== Preamble section =================================================
 
 import java.io._

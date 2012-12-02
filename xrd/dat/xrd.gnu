@@ -1,7 +1,7 @@
 set terminal png font "arial,8" size 500, 350
 set output 'xrd.png'
 set auto x
-set yrange [0:5000]
+set yrange [0:3000]
 set style data histogram
 set style histogram cluster gap 3
 set style fill solid border -1

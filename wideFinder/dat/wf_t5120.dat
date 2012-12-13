@@ -1,7 +1,9 @@
 # http://web.archive.org/web/20110510031921/http://wikis.sun.com/display/WideFinder/Results
 # the result submitted to widefinder wiki
-stats  loc  elapsed
-Ruby-S  78  91481
-Python-M  220  2056
-C-S  702  535
+stats  LoC  time
+Ruby  78  91481
+Python-M  124  1357
+Scala   196  888
+Scala-M  495  332
+C  702  535
 C-M  1345 191

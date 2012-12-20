@@ -1,0 +1,11 @@
+{
+	"partition": 2,
+	"service": 1,
+	"rate": 0.25,
+	"timeout": 2, 
+	"shape": 3,
+	"min": 0.2,
+	"mttf_mu": 95, 
+	"mttr_mu": 5,
+	"sigma": 1
+}

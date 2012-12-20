@@ -1,126 +1,96 @@
+var fileName = process.argv[2];
+var fs = require('fs');
+var bufferSize = 64 * 1024 * 1024;
+var size = fs.statSync(fileName).size;
 
-test_findEnd();
-
-function test_finder() {
-  var fs = require('fs');
-  var assert = require('assert');
-  var stream = require('stream').Stream;
-
-  var size = fs.statSync('./10k').size;
-
-  var position = Math.round(size / 1000);
-  // var now = Date.now();
-  console.log('file size is ' + size + ', find the next line end from ' + position);
-  findEnd('./10k', position, function(err, end) {
-    if (err) {
-      console.log(err.message);
-    } else {
-      console.log('the end position is ' + end);
-      console.log(finder('./10k', 0, end, \\));
-    }
+function sortObject(obj) {
+  var array = [], k, i;
+  for (k in obj) {
+    array.push({key: k, value: obj[k]});
+  }
+  array.sort(function(a, b) {
+    return (b.value - a.value);
   });
+  for (i = 0; i < 10; i += 1) {
+    console.log('     ' + array[i].value + ':' + array[i].key.substring(0,59));
+  }
 }
 
-
-function test_findEnd() {
-  var fs = require('fs');
-  var assert = require('assert');
-  var stream = require('stream').Stream;
-
-  var size = fs.statSync('./10k').size;
-
-  var position = Math.round(size / 2);
-  var now = Date.now();
-  console.log('file size is ' + size + ', find the next line end from ' + position);
-  findEnd('./10k', position, function(err, end) {
-    if (err) {
-      console.log(err.message);
-    } else {
-      console.log('the position is ' + end + ', time ' + (Date.now()-now));
-      fs.open('./10k', 'r', function(err, fd) {
-        if (err) {
-          console.log(err.message);
-        } else {
-          fs.read(fd, new Buffer(end - position + 1), 0, (end - position + 1), position, function(err, bytesRead, buffer){
-            assert.equal(buffer[end - position],'\n'.charCodeAt(0), 'findEnd does not work.');
-          });
-        }
-      });
-    }
-  });
+function updateObject(obj, key, value) {
+  if (obj[key]) {
+    obj[key] += value;
+  } else {
+    obj[key] = value;
+  }
 }
 
-function finder(fileName, start, end, pattern) {
-  var fs = require('fs');
-  var StringDecoder = require('string_decoder').StringDecoder;
-  var decoder = new StringDecoder('utf8');
-  var result = {};
-  var stream = fs.createReadStream(fileName, {
-      start: start,
-      end: end
-    });
-  var newline = '\n'.charCodeAt(0);
-  var left = new Buffer(0);
-  stream.on('data', function(data) {
-    var i, last = 0, line, match;
-    for (i = 0; i < data.length; i += 1) {
-      if(newline === data[i]) { 
-        if (last === 0 && Buffer.isBuffer(left) && left.length !== 0) {
-          line = Buffer.concat([left, data.slice(0, i)]).toString('utf8');
-          left = new Buffer(0);
-        } else {
-          line = data.toString('utf8', last, i);
+function parse(lines, u_hits, u_bytes, s404s, clients, refs) {
+  var i, line, f, client, u, status, bytes, ref;
+  var pattern = /^\/ongoing\/When\/\d\d\dx\/\d\d\d\d\/\d\d\/\d\d\/[^\s\.]+$/;
+  var refPattern = /^"http:\/\/www\.tbray\.org\/ongoing\//;
+  for (i = 0; i < lines.length; i += 1) {
+    line = lines[i];
+    f = line.split(/\s/);
+    if (f[5] === '"GET') {
+      client = f[0];
+      u = f[6];
+      status = f[8];
+      bytes = f[9];
+      ref = f[10];
+      if (status === '200') {
+        updateObject(u_bytes, u, parseInt(bytes, 10));
+        if (pattern.test(u)) {
+          updateObject(u_hits, u, 1);
+          updateObject(clients, client, 1);
+          if (!(ref === '"-"' || refPattern.test(ref))) {
+            updateObject(refs, ref.substring(1, ref.length-1), 1);
+          }
         }
-        match = pattern.exec(line);
-        if (match) {
-          if (result[match[0]]) {
-            result[match[0]] += 1;
-          } else {
-            result[match[0]] = 1;
-          } 
+      } else if (status === '304') {
+        if (pattern.test(u)) {
+          updateObject(u_hits, u, 1);
+          updateObject(clients, client, 1);
+          if (!(ref === '"-"' || refPattern.test(ref))) {
+            updateObject(refs, ref.substring(1, ref.length-1), 1);
+          }
         }
-        last = i + 1;  
+      } else if (status === '404') {
+        updateObject(s404s, u, 1);
       }
     }
-    left = Buffer.concat([left, data.slice(last)]); 
-  });
-  stream.on('end', function(){
-    return result;
-  });
-  stream.on('error', function(err){
-    throw err;
-  });
-
+  }
 }
 
-function findEnd(fileName, position, cb) {
-  var fs = require('fs');
-  var stream = fs.createReadStream(fileName, {
-    start: position
-  });
-  stream.on('data', function(data) {
-    var newline = '\n'.charCodeAt(0);
-    var i, found = false, last = position;
-    for (i = 0; i < data.length; i += 1) {
-      if(newline === data[i]) {
-        // find an ending
-        found = true;
-        break;
-      }
+function readThrough(fd, size, bufferSize, position, prefix, process, u_hits, u_bytes, s404s, clients, refs) {
+  fs.read(fd, new Buffer(bufferSize), 0, bufferSize, position, function(err, bytesRead, buffer){
+    var lines = buffer.toString('utf8').split(/\n/);
+    if(prefix.length > 0) {
+      lines[0] = prefix + lines[0];
     }
-    if (found) {
-      stream.destroy();
-      return cb(null, last + i);
+    var last = lines.pop();
+    process(lines, u_hits, u_bytes, s404s, clients, refs);
+    if (position + bufferSize >= size) {
+      console.log('file finished');
+      console.log('URIs by hit');
+      sortObject(u_hits);
+      console.log('URIs by bytes');
+      sortObject(u_bytes);
+      console.log('404s');
+      sortObject(s404s);
+      console.log('client addresses');
+      sortObject(clients);
+      console.log('referrers');
+      sortObject(refs);
+      return console.log('done');
     } else {
-      last += i;
+      readThrough(fd, size, bufferSize, (position + bytesRead + 1), last, process, u_hits, u_bytes, s404s, clients, refs);
     }
-  });
-  stream.on('end', function(){
-    return cb(new Error('not found any ending in the file'), null);
-  });
-  stream.on('error', function(err){
-    return cb(err, null);
   });
 }
 
-
+fs.open(fileName,'r', function(err, fd) {
+  if (err) {
+    return console.log(err.message);
+  }
+  readThrough(fd, size, bufferSize, 0, '', parse, {}, {}, {}, {}, {});
+});

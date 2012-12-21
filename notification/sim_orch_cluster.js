@@ -83,7 +83,9 @@ if (cluster.isMaster){
       case 'done': {
         console.log('fail: ' + fail);
         console.log('success: ' + success);
-        console.log('average: ' + average(stats));
+        // console.log('average: ' + sum(stats)/stats.length );
+        console.log('average: ' + average(stats) );
+        // console.log(stats);
         process.exit(0);
         break;
       }
@@ -110,23 +112,23 @@ function updateArrival(current) {
 }
 
 function updateNetwork(current, interface) {
-  console.log('network: ' + network_state + ' current: ' + current + ' interface: ' + interface);
+  // console.log('network: ' + network_state + ' current: ' + current + ' interface: ' + interface);
   if (network_state[interface] === 1) {
     network_state[interface] = 0;
     return current + nextGaussian(config.mttr_mu, config.sigma);
   } else {
-    console.log(waiting);
+    // console.log(waiting);
     network_state[interface] = 1;
     for (var i = 0; i < waiting[interface].length; i += 1) {
       if (current < waiting[interface][i]) {
         break;
       }
     }
-    console.log('failed ' + i);
+    // console.log('failed ' + i);
     fail += i * config.service;
     for (var j = 0; j < waiting[interface].length - i; j += 1) {
       for (var k = 0; k < config.service; k += 1) {
-        stats.push(current - waiting[0][j] + config.timeout + nextBoundedPareto(config.min, config.max, config.shape));
+        stats.push(current - waiting[interface][j] + config.timeout + nextBoundedPareto(config.min, config.max, config.shape));
         success += 1;
       } 
     }
@@ -153,10 +155,18 @@ function minIndex(array) {
   return position;
 }
 
-function average(array) {
-  return array.reduce(function(p, c, i, a) {
+function average(input) {
+  return input.reduce(function(p, c, i, a) {
     return (p * i + c) / (i + 1); 
   });
+}
+
+function sum(input) {
+  var s = 0; 
+  for (var i = 0; i < input.length; i += 1) {
+    s += input[i];
+  }
+  return s;
 }
 
 function nextExp(rate) {
@@ -192,6 +202,13 @@ function nextBoundedPareto(min, max, shape) {
   while (rnd === 0) { 
     rnd = Math.random(); 
   }
-  return min*max/Math.pow(Math.pow(max, shape)*(1-rnd) + Math.pow(min, shape)*rnd, 1/shape);
+  return min*max/Math.pow((Math.pow(max, shape)*(1-rnd) + Math.pow(min, shape)*rnd), 1/shape);
+  // var p = Math.pow(Math.pow(min, shape)/(rnd*Math.pow(min/max, shape)-rnd+1), 1/shape);
+  // if (isNaN(p)) {
+  //   console.
+  //   return max;
+  // } else {
+  //   return p;
+  // }
 }
 

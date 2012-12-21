@@ -5,6 +5,7 @@
 	"timeout": 2, 
 	"shape": 3,
 	"min": 0.2,
+  "max": 1,
 	"mttf_mu": 95, 
 	"mttr_mu": 5,
 	"sigma": 1

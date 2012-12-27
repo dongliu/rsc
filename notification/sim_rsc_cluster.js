@@ -10,9 +10,7 @@ var fs = require('fs'),
   event_name,
   waiting,
   fail,
-  success,
-  // stats = [], 
-  average; 
+  stats = []; // all stats here
 
 if (process.argv.length === 4) {
   config = JSON.parse(fs.readFileSync(__dirname + '/' + process.argv[2]));
@@ -28,7 +26,8 @@ if (cluster.isMaster){
   event_source.push(nextExp(config.rate));
   event_source.push(Math.random()*nextGaussian(config.mttf_mu, config.sigma));
   event_source.push(Math.random()*nextGaussian(config.mttf_mu, config.sigma));
-  event_name = ['arrival', '1-2', '1-3'];
+  event_source.push(Math.random()*nextGaussian(config.mttf_mu, config.sigma));
+  event_name = ['arrival', '1-2', '1-3', '2-3'];
   console.log(config);
   console.log(job_size);
   worker = cluster.fork();
@@ -59,10 +58,9 @@ if (cluster.isMaster){
   // init worker
   fail = 0;
   success = 0;
-  average = 0;
-  network_state = [1, 1];
-  waiting = new Array(config.partition);
-  for (i = 0; i < config.partition; i += 1) {
+  network_state = [1, 1, 1];
+  waiting = new Array(combination(config.partition+1, 2));
+  for (i = 0; i < waiting.length; i += 1) {
     waiting[i] = [];
   }
   process.on('message', function(msg){
@@ -84,12 +82,16 @@ if (cluster.isMaster){
         process.send({'type': 2, 'update': update});
         break;
       }
+      case '2-3': {
+        update = updateNetwork(msg.current, 2);
+        process.send({'type': 3, 'update': update});
+        break;
+      }
       case 'done': {
         console.log('fail: ' + fail);
         console.log('success: ' + success);
         // console.log('average: ' + sum(stats)/stats.length );
-        // console.log('average: ' + average(stats) );
-        console.log('average: ' + average);
+        console.log('average: ' + average(stats) );
         // console.log(stats);
         process.exit(0);
         break;
@@ -100,25 +102,31 @@ if (cluster.isMaster){
 
 function updateArrival(current) {
   for (var j = 0; j < config.service; j += 1) {
-    // stats.push(nextBoundedPareto(config.min/10, config.max/10, config.shape));
-    average = incAverage(average, success, nextBoundedPareto(config.min/10, config.max/10, config.shape));
+    stats.push(nextBoundedPareto(config.min/10, config.max/10, config.shape));
     success += 1;
   }
-  for(var i = 0; i < config.partition; i += 1) {
+  for(var i = 0; i < config.partition; i += 1) { // direct connection fail
     if (network_state[i] === 1) {
+      var task_delay = nextBoundedPareto(config.min, config.max, config.shape);
       for (j = 0; j < config.service; j += 1) {
-        // stats.push(nextBoundedPareto(config.min, config.max, config.shape));
-        average = incAverage(average, success, nextBoundedPareto(config.min, config.max, config.shape));
+        stats.push(task_delay + nextBoundedPareto(config.min/10, config.max/10, config.shape));
+        success += 1;
+      }
+    } else if (sum(network_state) >= 2) { // indirect connection available, need to be more robust
+      var task_delay_2 = nextBoundedPareto(config.min, config.max, config.shape) + nextBoundedPareto(config.min, config.max, config.shape);
+      for (j = 0; j < config.service; j += 1) {
+        stats.push(task_delay_2 + nextBoundedPareto(config.min/10, config.max/10, config.shape));
         success += 1;
       }
     } else {
-      waiting[i].push(current+config.timeout);
+      waiting[2].push(current + config.timeout); // simple strategy, always wait for the indirect connection
     }
   }
   return current + nextExp(config.rate);
 }
 
 function updateNetwork(current, interface) {
+  var task_delay, task_delay_2;
   // console.log('network: ' + network_state + ' current: ' + current + ' interface: ' + interface);
   if (network_state[interface] === 1) {
     network_state[interface] = 0;
@@ -134,9 +142,14 @@ function updateNetwork(current, interface) {
     // console.log('failed ' + i);
     fail += i * config.service;
     for (var j = 0; j < waiting[interface].length - i; j += 1) {
-      for (var k = 0; k < config.service; k += 1) {
-        // stats.push(current - waiting[interface][j] + config.timeout + nextBoundedPareto(config.min, config.max, config.shape));
-        average =  incAverage(average, success, current - waiting[interface][j] + config.timeout + nextBoundedPareto(config.min, config.max, config.shape));
+      task_delay = nextBoundedPareto(config.min, config.max, config.shape);
+      task_delay_2 = nextBoundedPareto(config.min, config.max, config.shape) + nextBoundedPareto(config.min, config.max, config.shape);
+      for (var k = 0; k < config.service; k += 1) { 
+        if (interface === 2) {
+          stats.push(current - waiting[interface][j] + config.timeout + task_delay_2 + nextBoundedPareto(config.min/10, config.max/10, config.shape));
+        } else {
+          stats.push(current - waiting[interface][j] + config.timeout + task_delay + nextBoundedPareto(config.min/10, config.max/10, config.shape));
+        }
         success += 1;
       } 
     }
@@ -163,22 +176,35 @@ function minIndex(array) {
   return position;
 }
 
-function average(input) {
-  return input.reduce(function(p, c, i, a) {
+function average(array) {
+  return array.reduce(function(p, c, i, a) {
     return (p * i + c) / (i + 1); 
   });
 }
 
-function incAverage(current, size, value) {
-  return (current * size + value) / (size + 1); 
-}
-
-function sum(input) {
+function sum(array) {
   var s = 0; 
-  for (var i = 0; i < input.length; i += 1) {
-    s += input[i];
+  for (var i = 0; i < array.length; i += 1) {
+    s += array[i];
   }
   return s;
+}
+
+function combination(n, p) {
+  return product(n - p + 1, n) / product(1, p);
+}
+
+function product(start, end) {
+  if (start > end) {
+    var swap = start;
+    start = end;
+    end = swap;
+  }
+  var result = 1;
+  for (var i = start; i < end + 1; i += 1) {
+    result = result * i;
+  }
+  return result;
 }
 
 function nextExp(rate) {
@@ -216,6 +242,5 @@ function nextBoundedPareto(min, max, shape) {
   }
   // return min*max/Math.pow((Math.pow(max, shape)*(1-rnd) + Math.pow(min, shape)*rnd), 1/shape);
   return Math.pow(Math.pow(min, shape)/(rnd*Math.pow(min/max, shape)-rnd+1), 1/shape);
-
 }
 

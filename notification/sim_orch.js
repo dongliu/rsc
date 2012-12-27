@@ -29,9 +29,7 @@ current = 0;
 fail = 0;
 success = 0;
 network_state = [1, 1];
-// event_source = new Array(2+config.partition);
 event_source.push(nextExp(config.rate));
-// event_source.push(event_source[0]+config.timeout);
 event_source.push(Math.random()*nextGaussian(config.mttf_mu, config.sigma));
 event_source.push(Math.random()*nextGaussian(config.mttf_mu, config.sigma));
 event_name = ['arrival', '1-2', '1-3'];
@@ -44,9 +42,7 @@ for (i = 0; i < config.partition; i += 1) {
 
 simulator = new sim.Sim;
 network_event = new sim.Sim;
-// arrival_event = new sim.Sim;
 
-// sim_event.on('arrival', function(current){
 network_event.on('arrival', function(){
   // console.log('arrival at ' + current);
   job_size = job_size - 1;
@@ -66,11 +62,10 @@ network_event.on('arrival', function(){
     }
   }
   event_source[0] = current + nextExp(config.rate);
-  process.nextTick(simulator.emit('next'));
-  // simulator.emit('next', 'arrival');
+  // process.nextTick(simulator.emit('next'));
+  simulator.emit('next', 'arrival');
 });
 
-// sim_event.on('1-2', function(current){
 network_event.on('1-2', function(){
   // console.log(network_state);
   // console.log('connection 1-2 changes at ' + current);
@@ -89,18 +84,17 @@ network_event.on('1-2', function(){
     fail += i * config.service;
     for (var j = 0; j < waiting[0].length - i; j += 1) {
       for (var k = 0; k < config.service; k += 1) {
-        // stats.push(current - waiting[0][j] + config.timeout + nextPareto(config.min, config.shape));
+        stats.push(current - waiting[0][j] + config.timeout + nextPareto(config.min, config.shape));
         success += 1;
       } 
     }
     waiting[0] = []; // clear waiting list
     event_source[1] = current + nextGaussian(config.mttf_mu, config.sigma);
   }
-  process.nextTick(simulator.emit('next'));
-  // simulator.emit('next', '1-2');
+  // process.nextTick(simulator.emit('next'));
+  simulator.emit('next', '1-2');
 });
 
-// sim_event.on('1-3', function(current){
 network_event.on('1-3', function(){
   // console.log(network_state);
   // console.log('connection 1-3 changes at ' + current);
@@ -119,15 +113,15 @@ network_event.on('1-3', function(){
     fail += i * config.service;
     for (var j = 0; j < waiting[1].length - i; j += 1) {
       for (var k = 0; k < config.service; k += 1) {
-        // stats.push(current - waiting[1][j] + config.timeout + nextPareto(config.min, config.shape));
+        stats.push(current - waiting[1][j] + config.timeout + nextPareto(config.min, config.shape));
         success += 1;
       } 
     }
     waiting[1] = []; // clear waiting list
     event_source[2] = current + nextGaussian(config.mttf_mu, config.sigma);
   }
-  process.nextTick(simulator.emit('next'));
-  // simulator.emit('next', '1-3')
+  // process.nextTick(simulator.emit('next'));
+  simulator.emit('next', '1-3')
 });
 
 simulator.on('next', function(){
@@ -142,8 +136,6 @@ simulator.on('next', function(){
         console.log('done');
         console.log('fail: ' + fail);
         console.log('success: ' + success);
-        // console.log(event_source);
-        // console.log(waiting);
         console.log('stats: ' + stats.length);
         // console.log('stats: ' + stats);
         simulator.removeAllListeners();
@@ -153,25 +145,9 @@ simulator.on('next', function(){
       } else {
         // process.nextTick(sim_event.emit(event_name[i], min));
         // console.log('current is ' + min);
-        // sim_event.emit(event_name[i], min);
         current = min;
-        // switch (i) {
-        //   case 0: {
-        //     sim_event.emit('arrival');
-        //     break;
-        //   }
-        //   case 1: {
-        //     sim_event.emit('1-2');
-        //     break;
-        //   }
-        //   case 2: {
-        //     sim_event.emit('1-3');
-        //     break;
-        //   }
-
-        // }
-        // network_event.emit(event_name[i], 'next');
-        process.nextTick(network_event.emit(event_name[i]));
+        network_event.emit(event_name[i], 'next');
+        // process.nextTick(network_event.emit(event_name[i]));
       }
         
     }

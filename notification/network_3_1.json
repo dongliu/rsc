@@ -1,12 +1,12 @@
 {
 	"partition": 2,
-	"service": 1,
+	"service": 10,
 	"rate": 0.25,
 	"timeout": 2, 
 	"shape": 1,
 	"min": 0.2,
-  "max": 1,
-	"mttf_mu": 95, 
-	"mttr_mu": 5,
+  "max": 5,
+	"mttf_mu": 75, 
+	"mttr_mu": 25,
 	"sigma": 1
 }
